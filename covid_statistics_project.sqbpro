@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="/Users/ryanshanahan/Desktop/covid_statistics_project.db" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="3"/></window><tab_structure><column_width id="0" width="300"/><column_width id="1" width="0"/><column_width id="2" width="100"/><column_width id="3" width="5719"/><column_width id="4" width="0"/><expanded_item id="0" parent="1"/><expanded_item id="0" parent="0"/><expanded_item id="1" parent="1"/><expanded_item id="2" parent="1"/><expanded_item id="3" parent="1"/></tab_structure><tab_browse><current_table name="4,12:maincovid_deaths"/><default_encoding codec=""/><browse_table_settings><table schema="main" name="covid_deaths" show_row_id="0" encoding="" plot_x_axis="" unlock_view_pk="_rowid_"><sort/><column_widths><column index="1" value="66"/><column index="2" value="58"/><column index="3" value="69"/><column index="4" value="55"/><column index="5" value="73"/><column index="6" value="68"/><column index="7" value="66"/><column index="8" value="124"/><column index="9" value="74"/><column index="10" value="72"/><column index="11" value="129"/><column index="12" value="134"/><column index="13" value="132"/><column index="14" value="189"/><column index="15" value="139"/><column index="16" value="137"/><column index="17" value="195"/><column index="18" value="102"/><column index="19" value="72"/><column index="20" value="138"/><column index="21" value="82"/><column index="22" value="147"/><column index="23" value="131"/><column index="24" value="196"/><column index="25" value="140"/><column index="26" value="206"/></column_widths><filter_values/><conditional_formats/><row_id_formats/><display_formats/><hidden_columns/><plot_y_axes/><global_filter/></table></browse_table_settings></tab_browse><tab_sql><sql name="SQL 1">Select *
+From covid_deaths
+Where continent is not null 
+Order By 3,4;
+
+
+-- Relevant data query 
+
+Select location, date, population, new_cases, total_cases, total_deaths
+From covid_deaths
+Where continent is not null 
+Order by 1,2;
+
+-- Calculating death percentage in US 
+-- Shows the likelihood of dying if you contract COVID in your country
+
+Select location, date, total_cases, total_deaths,  (total_deaths*1.0/total_cases*1.0)*100.0  as death_percentage 
+From covid_deaths
+Where location like &quot;%states%&quot; and continent is not null 
+Order by 1,2;
+
+-- Looking at total cases vs the population
+-- Shows what percentage of the population got COVID 
+
+Select location, date, population, total_cases, (total_cases*1.0/population*1.0)*100 as cases_percentage
+From covid_deaths
+Where location like &quot;%states%&quot; and  continent is not null 
+Order by 1, 2;
+
+-- What countries have the highest infection rates compared to their population
+
+Select location, population, Max(total_cases) as Highest_Infection_Count, Max((total_cases*1.0/population*1.0))*100 as Population_Infection_Percentage
+From covid_deaths
+Where continent is not null 
+Group by location, population
+Order by  Population_Infection_Percentage DESC;
+
+-- Countries with the highest death count per population
+
+Select location,  MAX(cast(total_deaths as int))  as Total_Death_Count
+From covid_deaths
+Where continent is not null 
+Group by location
+Order by  Total_Death_Count DESC;
+
+-- Let's break things down by continent
+-- Showing continents with highest death count
+
+Select continent,  MAX(cast(total_deaths as int))  as Total_Death_Count
+From covid_deaths
+Where continent is  not null 
+Group by continent
+Order by  Total_Death_Count DESC;
+
+-- Global numbers
+
+Select date, SUM(cast(new_cases as int)) as total_cases, SUM(cast(new_deaths as int)) as total_deaths, (SUM(new_deaths * 1.0)/SUM(new_cases * 1.0)*100.0)  as death_percentage 
+From covid_deaths
+Where  continent is not null 
+Group By date
+Order by 1,2;
+
+-- Vaccinations
+
+Select *
+From covid_deaths as dea Join covid_vaccinations as vac
+	On dea.location = vac.location and dea.date = vac.date;
+
+-- Looking at total population vs vaccinations
+
+Select dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(cast(vac.new_vaccinations as int)) Over (Partition by dea.location Order by dea.location, dea.date) as rolling_vax_count
+From covid_deaths as dea Join covid_vaccinations as vac
+	On dea.location = vac.location and dea.date = vac.date
+Where dea.continent is not null 
+Order by  2, 3; 
+
+-- Use CTE 
+
+With PopVsVax (continent, location, date, population, new_vaccinations, rolling_vax_count)
+as 
+(
+Select dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(cast(vac.new_vaccinations as int)) Over (Partition by dea.location Order by dea.location, dea.date) as rolling_vax_count
+From covid_deaths as dea Join covid_vaccinations as vac
+	On dea.location = vac.location and dea.date = vac.date
+Where dea.continent is not null  
+)
+
+Select *, rolling_vax_count*1.0/population*1.0 * 100 as rolling_vax_percentage
+From PopVsVax;
+
+-- Temp TABLE
+
+Drop Table if exists Percent_Population_Vaccinated;
+CREATE Table Percent_Population_Vaccinated
+	(
+	continent Text,
+	location Text,
+	Date Text,
+	Population numeric,
+	new_vaccinations numeric,
+	rolling_vax_count numeric
+	);
+	
+Insert into Percent_Population_Vaccinated
+Select dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(cast(vac.new_vaccinations as int)) Over (Partition by dea.location Order by dea.location, dea.date) as rolling_vax_count
+From covid_deaths as dea Join covid_vaccinations as vac
+	On dea.location = vac.location and dea.date = vac.date
+Where dea.continent is not null;
+
+Select *, rolling_vax_count*1.0/population*1.0 * 100 as rolling_vax_percentage
+From Percent_Population_Vaccinated;
+
+-- Creating view to store data for later visualizations
+
+Create view PercentPopulationVaccinated as 
+Select dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(cast(vac.new_vaccinations as int)) Over (Partition by dea.location Order by dea.location, dea.date) as rolling_vax_count
+From covid_deaths as dea Join covid_vaccinations as vac
+	On dea.location = vac.location and dea.date = vac.date
+Where dea.continent is not null;
+
+</sql><current_tab id="0"/></tab_sql></sqlb_project>
